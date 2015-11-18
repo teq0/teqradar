@@ -67,9 +67,35 @@ function loremIpsum(elem) {
     return ret;
 }
 
-(function() {
+(function($) {
+
+    // pseudo selector for matching exact text
+
+    $.expr[':'].textEquals = $.expr.createPseudo(function(arg) {
+        return function( elem ) {
+            return $(elem).text().trim().match("^" + arg + "$");
+        };
+    });
 
     var dataRepo = function() {
+
+        function parseDummyPage() {
+            var $macros = $(dummyPage);
+            var $details = $macros.find('ac\\:structured-macro[ac\\:name="details"]>ac\\:rich-text-body>table>tbody');
+
+            function findPageProp(key) {
+                var val = $details.find('th:textEquals("' + key + '")').next().text();
+                return val || '';
+            }
+
+            var item = {
+                name: findPageProp('Name'),
+                status: findPageProp('Status'),
+                category: findPageProp('Category'),
+                description: findPageProp('Description')
+            };
+
+        }
 
         function genDummyData(minItems, maxItems) {
 
@@ -109,7 +135,7 @@ function loremIpsum(elem) {
                 var item = {
                     name: genValue(names),
                     status: genValue(cfg.statuses),
-                    category: 'Languages and Frameworks',
+                    category: genValue(cfg.quadrants),
                     description: loremIpsum()
                 };
 
@@ -120,6 +146,8 @@ function loremIpsum(elem) {
         }
 
         function getRadarData() {
+
+            parseDummyPage();
 
             // TODO - read data from somewhere
             return genDummyData(18, 30);
@@ -148,8 +176,7 @@ function loremIpsum(elem) {
                 'Tools',
                 'Techniques',
                 'Platforms'
-            ],
-            currentQuadrant: 0
+            ]
         };
 
         function getRadarElement() {
@@ -174,7 +201,7 @@ function loremIpsum(elem) {
     }
 
     init();
-})();
+})($);
 
 function Radar(dataRepo, displayManager) {
 
@@ -189,7 +216,7 @@ function Radar(dataRepo, displayManager) {
         PI_ON_16: Math.PI/16
     };
 
-    function displayRadar() {
+    function displayRadar(category) {
 
         var radarRoot = dMgr.getRadarElement();
         var cfg = dMgr.getRadarConfig();
@@ -250,7 +277,9 @@ function Radar(dataRepo, displayManager) {
 
         var data = dRepo.getRadarData();
 
-        _.forEach(data.items, function(item, idx) {
+        var quadrantItems = !!category ? _.filter(data.items, { category: category }) : data.items;
+
+        _.forEach(quadrantItems, function(item, idx) {
             item.idx = idx;
 
             var ring = _.find(rings, { name: item.status});
@@ -258,6 +287,9 @@ function Radar(dataRepo, displayManager) {
             if (ring) {
                 item.ring = ring;
                 ring.totalItems++;
+            }
+            else {
+                throw "Unknown status: " + item.status;
             }
         });
 
@@ -270,7 +302,7 @@ function Radar(dataRepo, displayManager) {
 
         var symbolSize = 800;
         var circles = svg.selectAll("path")
-                .data(data.items)
+                .data(quadrantItems)
             .enter()
                 .append("path")
                 .attr("transform", function(d) {
@@ -339,5 +371,4 @@ function Radar(dataRepo, displayManager) {
         displayRadar: displayRadar
     };
 }
-
 
