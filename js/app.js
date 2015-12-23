@@ -99,50 +99,65 @@ function loremIpsum(elem) {
 
         function genDummyData(minItems, maxItems) {
 
-            minItems = minItems || 35;
-            maxItems = maxItems || minItems;
-            maxItems = Math.max(minItems, maxItems);
+          var statuses = [
+            'Adopt',
+            'Trial',
+            'Assess',
+            'Avoid'
+          ];
 
-            var numItems = (minItems != maxItems) ? Math.floor(Math.random() * (maxItems - minItems)) + minItems : maxItems;
+          var quadrants = [
+            'Languages and frameworks',
+            'Tools',
+            'Techniques',
+            'Platforms'
+          ];
 
-            var cfg = displayManager().getRadarConfig();
-            var data = {
-                items: []
-            };
+          var names = [
+            'ASP.NET MVC',
+            'JSON API',
+            'React JS',
+            'Swift',
+            'Docker',
+            'Ionic',
+            'Xamarin',
+            'Reverse Conway',
+            'Angular 2.0',
+            'React Mobile',
+            'Golang',
+            'Neo4j'
+          ];
 
-            function genValue(arr) {
-                return arr[Math.floor(Math.random() * arr.length)];
-            }
+          minItems = minItems || 35;
+          maxItems = maxItems || minItems;
+          maxItems = Math.max(minItems, maxItems);
 
-            var names = [
-                'ASP.NET MVC',
-                'JSON API',
-                'React JS',
-                'Swift',
-                'Docker',
-                'Ionic',
-                'Xamarin',
-                'Reverse Conway',
-                'Angular 2.0',
-                'React Mobile',
-                'Golang',
-                'Neo4j'
-            ];
+          var numItems = (minItems != maxItems) ? Math.floor(Math.random() * (maxItems - minItems)) + minItems : maxItems;
 
-            numItems = numItems || 35;
+          var data = {
+            statuses: statuses,
+            quadrants: quadrants,
+            items: []
+          };
 
-            for (var idx = 0; idx < numItems; idx++) {
-                var item = {
-                    name: genValue(names),
-                    status: genValue(cfg.statuses),
-                    category: genValue(cfg.quadrants),
-                    description: loremIpsum()
-                };
+          function genValue(arr) {
+              return arr[Math.floor(Math.random() * arr.length)];
+          }
 
-                data.items.push(item);
-            }
+          numItems = numItems || 35;
 
-            return data;
+          for (var idx = 0; idx < numItems; idx++) {
+              var item = {
+                  name: genValue(names),
+                  status: genValue(statuses),
+                  category: genValue(quadrants),
+                  description: loremIpsum()
+              };
+
+              data.items.push(item);
+          }
+
+          return data;
         }
 
         function getRadarData() {
@@ -150,7 +165,7 @@ function loremIpsum(elem) {
             parseDummyPage();
 
             // TODO - read data from somewhere
-            return genDummyData(18, 30);
+            return genDummyData(24, 64);
         }
 
         return {
@@ -161,22 +176,10 @@ function loremIpsum(elem) {
     var displayManager = function() {
 
         var radarConfig = {
-            width: 500,
-            height: 500,
-            xMargin: 10,
-            yMargin: 10,
-            statuses: [
-                'Adopt',
-                'Trial',
-                'Assess',
-                'Avoid'
-            ],
-            quadrants: [
-                'Languages and frameworks',
-                'Tools',
-                'Techniques',
-                'Platforms'
-            ]
+            width: 700,
+            height: 700,
+            xMargin: 30,
+            yMargin: 30
         };
 
         function getRadarElement() {
@@ -194,177 +197,219 @@ function loremIpsum(elem) {
     };
 
     function init() {
+      var data = dataRepo().getRadarData();
+      var displayConfig = displayManager().getRadarConfig();
+      displayConfig.radarRoot = d3.select('.radarDisplay');
 
-        var radar = Radar(dataRepo, displayManager);
+      var radar = new Radar(data, displayConfig);
 
-        radar.displayRadar();
+      radar.displayRadar(data, data.quadrants[0], displayConfig);
     }
 
     init();
 })($);
 
-function Radar(dataRepo, displayManager) {
+function Radar(data, category, displayConfig) {
 
-    var dRepo = dataRepo();
-    var dMgr = displayManager();
-    var radians = {
-        PI: Math.PI,
-        PI_ON_2: Math.PI/2,
-        PI_ON_4: Math.PI/4,
-        PI_ON_8: Math.PI/8,
-        THREE_PI_ON_2: 3 * Math.PI/2,
-        PI_ON_16: Math.PI/16
-    };
+  var radians = {
+      PI: Math.PI,
+      PI_ON_2: Math.PI/2,
+      PI_ON_4: Math.PI/4,
+      PI_ON_8: Math.PI/8,
+      THREE_PI_ON_2: 3 * Math.PI/2,
+      PI_ON_16: Math.PI/16
+  };
 
-    function displayRadar(category) {
+  // the physical size of the canvas
+  var svgWidth, svgHeight, rWidth, rHeight;
 
-        var radarRoot = dMgr.getRadarElement();
-        var cfg = dMgr.getRadarConfig();
+  // need a scale object so we can work normalised to 1000x1000
 
-        // get the physical size of the canvas
-        var svgWidth = cfg.width - cfg.xMargin;
-        var svgHeight = cfg.height - cfg.yMargin;
-        var rWidth = 1000;
-        var rHeight = 1000;
+  var maxRadius, rScale, iScale;
 
-        // get a scale object so we can work normalised to 1000x1000
+  // one ring per status
+  var rings = [];
 
-        var maxRadius = Math.sqrt((rWidth*rWidth) + (rHeight*rHeight));
-        var rScale = d3.scale.linear()
-            .domain([0, maxRadius])
-            .range([0, Math.sqrt(svgWidth*svgHeight)]);
+  // radar builder functions
 
-        // one ring per status
-        var rings = [];
 
-        var svg = radarRoot.append("svg")
-            .attr("width", svgWidth)
-            .attr("height", svgHeight);
 
-        var g = svg.append("g")
-            .attr("transform", "translate(" + svgWidth + "," + svgHeight + ")");
+  function displayRadar(data, quadrant, displayConfig) {
 
-        // calculate the ring radii
-        var innerRadius = 0, outerRadius = 500;
+    function drawRings(svgRings, rings) {
 
-        _.forEach(cfg.statuses, function(status) {
+      for (var idxRing = 0; idxRing < rings.length; idxRing++) {
+        var ring = rings[idxRing];
 
-            var ring = {
-                innerRadius: innerRadius,
-                outerRadius: outerRadius,
-                ringWidth: outerRadius - innerRadius,
-                name: status,
-                itemCount: 0,
-                totalItems: 0
-            };
+        var arc = d3.svg.arc()
+          .innerRadius(rScale(ring.innerRadius))
+          .outerRadius(rScale(ring.outerRadius))
+          .startAngle(0)
+          .endAngle(radians.PI_ON_2);
 
-            innerRadius = outerRadius;
-            outerRadius += ring.ringWidth / Math.SQRT2;
+        svgRings.append("path")
+          .attr("class", "arc" + idxRing)
+          .attr("d", arc);
 
-            rings.push(ring);
+        // add labels
+        svgRings.append("text")
+          .attr("class", "ringLabel")
+          .attr("text-anchor", "middle")
+          .attr("x", rScale(ring.centerRadius))
+          .attr("y", -3) // eek - magic number! this should be a constant
+          .text(ring.name);
+
+      }
+
+    }
+    function drawItems(svg, quadrantItems) {
+
+      var symbolSize = 800;
+      //Add the SVG Text Element to the svgContainer
+      var textXOffset = rScale(-4.2);
+      var textYOffset = rScale(13);
+
+      svg.selectAll("path")
+        .data(quadrantItems)
+        .enter()
+        .append("path")
+        .attr("transform", function(d) {
+
+          // distribute the items around the diagonal
+          var theta = (-radians.PI_ON_4) + ((((d.ring.itemCount & 1) << 1) - 1) * ((d.ring.itemCount + 1) >> 1) * d.ring.itemTheta) + ((Math.random() - 0.5) * radians.PI_ON_16);
+          d.ring.itemCount++;
+
+          var radius = d.ring.innerRadius + (d.ring.ringWidth / 2) + (1 + ((Math.random() - 0.5)) * Math.sqrt(d.ring.ringWidth) * 5);
+
+          d.x = (iScale(radius) * Math.cos(theta)) + displayConfig.xMargin;
+          d.y = (iScale(radius) * Math.sin(theta)) - displayConfig.yMargin;
+
+          return "translate(" + d.x + "," + d.y + ")";
+        })
+        .attr("class", "radarItem")
+        .attr("d", d3.svg.symbol().size(rScale(symbolSize))
+          .type('triangle-up'))
+        .each(function(d, i) {
+          // I wonder if this causes a circular reference?
+          d.symbol = this;
         });
 
-        // scale the width of the rings
-        var ringScale = d3.scale.linear()
-            .domain([0, rings[rings.length - 1].outerRadius])
-            .range([0, maxRadius]);
-
-        _.forEach(rings, function(ring, idx) {
-            ring.innerRadius = ringScale(ring.innerRadius);
-            ring.outerRadius = ringScale(ring.outerRadius);
-            ring.ringWidth = ring.outerRadius - ring.innerRadius;
-        });
-
-        var data = dRepo.getRadarData();
-
-        var quadrantItems = !!category ? _.filter(data.items, { category: category }) : data.items;
-
-        _.forEach(quadrantItems, function(item, idx) {
-            item.idx = idx;
-
-            var ring = _.find(rings, { name: item.status});
-
-            if (ring) {
-                item.ring = ring;
-                ring.totalItems++;
-            }
-            else {
-                throw "Unknown status: " + item.status;
-            }
-        });
-
-        _.forEach(rings, function(ring, idx) {
-            // get the radial angle between items
-            ring.itemTheta = (radians.PI_ON_2 * 0.9) / ring.totalItems;
-
-            // TODO - if itemTheta is too small for the ring's radius things will collide, and we'll need two bands of items
-        });
-
-        var symbolSize = 800;
-        var circles = svg.selectAll("path")
-                .data(quadrantItems)
-            .enter()
-                .append("path")
-                .attr("transform", function(d) {
-
-                    // distribute the items around the diagonal
-                    var theta = radians.PI_ON_4 + ((((d.ring.itemCount & 1) << 1) -1) * ((d.ring.itemCount + 1) >> 1) * d.ring.itemTheta) + ((Math.random() - 0.5) * radians.PI_ON_16);
-                    d.ring.itemCount++;
-
-                    var radius = d.ring.innerRadius + (d.ring.ringWidth / 2) + (1 + ((Math.random() - 0.5)) * Math.sqrt(d.ring.ringWidth) * 5);
-
-                    d.x = svgWidth - (rScale(radius) * Math.cos(theta)) - cfg.xMargin;
-                    d.y = svgHeight - (rScale(radius) * Math.sin(theta)) - cfg.yMargin;
-
-                    return "translate(" + d.x + "," + d.y + ")";
-                })
-                .attr("class", "radarItem")
-                .attr("d", d3.svg.symbol().size(rScale(symbolSize))
-                .type('triangle-up'))
-                .each(function(d, i) {
-                        // I wonder if this causes a circular reference?
-                        d.symbol = this;
-                });
+      svg.selectAll("text")
+        .data(quadrantItems)
+        .enter()
+        .append("text")
+        .attr("x", function(d) { return d.x + (textXOffset * ((d.idx+1).toString().length + 1)); })
+        .attr("y", function(d) { return d.y + textYOffset; })
+        .text( function (d) { return d.idx + 1; })
+        .attr("font-family", "sans-serif")
+        .attr("font-size", "8px")
+        .attr("fill", "white")
+        .attr('text-align', 'center')
+        .call(d3.helper.tooltip(
+          function(d, i){
+            return "<b>" + (d.idx + 1) +": " + d.name + "</b><br/><em>" + d.status + "</em><br/><br/>" + d.description;
+          }
+        ));
+    }
 
 
-        //Add the SVG Text Element to the svgContainer
-        var text = svg.selectAll("text")
-                                .data(data.items)
-                                .enter()
-                                .append("text");
+    svgWidth = displayConfig.width;
+    svgHeight = displayConfig.height;
+    rWidth = 1000;
+    rHeight = 1000;
 
-        var textXOffset = rScale(-4.2);
-        var textYOffset = rScale(13);
+    // get a scale object so we can work normalised to 1000x1000
 
-        //Add SVG Text Element Attributes
-        var textLabels = text
-             .attr("x", function(d) { return d.x + (textXOffset * ((d.idx+1).toString().length + 1)); })
-             .attr("y", function(d) { return d.y + textYOffset; })
-             .text( function (d) { return d.idx + 1; })
-             .attr("font-family", "sans-serif")
-             .attr("font-size", "8px")
-             .attr("fill", "white")
-             .attr('text-align', 'center')
-            .call(d3.helper.tooltip(
-                function(d, i){
-                    return "<b>" + (d.idx + 1) +": " + d.name + "</b><br/><em>" + d.status + "</em><br/><br/>" + d.description;
-                }
-            ));
+    maxRadius = Math.sqrt((rWidth*rWidth) + (rHeight*rHeight));
 
+    rScale = d3.scale.linear()
+        .domain([0, maxRadius])
+        .range([0, Math.sqrt(svgWidth*svgHeight)]);
 
-        for (var idxRing = 0; idxRing < rings.length; idxRing++) {
-            var ring = rings[idxRing];
+    iScale = d3.scale.linear()
+      .domain([0, maxRadius])
+      .range([0, Math.sqrt((svgWidth-displayConfig.xMargin)*(svgHeight - displayConfig.yMargin))]);
 
-            var arc = d3.svg.arc()
-                .innerRadius(rScale(ring.innerRadius))
-                .outerRadius(rScale(ring.outerRadius))
-                .startAngle(radians.THREE_PI_ON_2)
-                .endAngle(2 * Math.PI);
+    var svgCanvas = displayConfig.radarRoot.append("svg")
+          .attr("width", svgWidth)
+          .attr("height", svgHeight);
 
-            g.append("path")
-                .attr("class", "arc" + idxRing)
-                .attr("d", arc);
-        }
+      var svgRings = svgCanvas.append("g")
+          .attr("transform", "translate(0," + svgHeight + ")");
+
+      // calculate the ring radii
+      var innerRadius = rScale(displayConfig.yMargin), outerRadius = maxRadius;
+
+      _.forEach(data.statuses, function(status) {
+
+          var ring = {
+              innerRadius: innerRadius,
+              outerRadius: outerRadius,
+              ringWidth: outerRadius - innerRadius,
+              name: status,
+              itemCount: 0,
+              totalItems: 0
+          };
+
+          innerRadius = outerRadius;
+          outerRadius += ring.ringWidth / Math.SQRT2;
+
+          rings.push(ring);
+      });
+
+      // scale the width of the rings
+      var ringScale = d3.scale.linear()
+          .domain([0, rings[rings.length - 1].outerRadius])
+          .range([0, maxRadius]);
+
+      _.forEach(rings, function(ring, idx) {
+          ring.innerRadius = ringScale(ring.innerRadius);
+          ring.outerRadius = ringScale(ring.outerRadius);
+          ring.centerRadius = (ring.innerRadius + ring.outerRadius)/2;
+          ring.ringWidth = ring.outerRadius - ring.innerRadius;
+      });
+
+      var quadrantItems = !!quadrant ? _.filter(data.items, { category: quadrant }) : data.items;
+
+      _.forEach(quadrantItems, function(item, idx) {
+          item.idx = idx;
+
+          var ring = _.find(rings, { name: item.status});
+
+          if (ring) {
+              item.ring = ring;
+              ring.totalItems++;
+          }
+          else {
+              throw "Unknown status: " + item.status;
+          }
+      });
+
+      _.forEach(rings, function(ring, idx) {
+          // get the radial angle between items
+          ring.itemTheta = (radians.PI_ON_2 * 0.9) / ring.totalItems;
+
+          // TODO - if itemTheta is too small for the ring's radius things will collide, and we'll need two bands of items
+      });
+
+      drawRings(svgRings, rings);
+      drawItems(svgRings, quadrantItems);
+
+      svgCanvas.append("rect")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", displayConfig.xMargin)
+        .attr("height", svgHeight)
+        .attr("opacity", 0.15)
+        .attr("fill", "white");
+
+      svgCanvas.append("rect")
+        .attr("x", 0)
+        .attr("y", svgHeight - displayConfig.yMargin)
+        .attr("width", svgWidth)
+        .attr("height", displayConfig.yMargin)
+        .attr("opacity", 0.15)
+        .attr("fill", "white");
     }
 
     return {
